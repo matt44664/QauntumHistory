@@ -15,18 +15,25 @@ function renderFrame(ctx, wavelength, slitSep, showOneSlit, time) {
   const slitHalf = 5;
 
   // Pre-compute per-row screen intensity (static, time-averaged)
-  // Uses the path difference at the screen's x position
   const screenDx = SCREEN_X - barrierX;
+  const slitWidth = slitHalf * 2 + 2; // estimated physical slit width in pixels
   const screenIntensity = new Float32Array(SIM_H);
   for (let y = 0; y < SIM_H; y++) {
     const dy1 = y - slit1Y;
     const dy2 = y - slit2Y;
-    const sr1 = Math.sqrt(screenDx * screenDx + dy1 * dy1) || 0.001;
-    const sr2 = Math.sqrt(screenDx * screenDx + dy2 * dy2) || 0.001;
-    const pd = sr2 - sr1;
-    screenIntensity[y] = showOneSlit
-      ? Math.pow(Math.cos(k * pd / 2), 2) * 0.8
-      : Math.pow(Math.cos(k * pd / 2), 2);
+    if (showOneSlit) {
+      // Single-slit diffraction: sinc² envelope centred on slit 1
+      const angle = Math.atan2(dy1, screenDx);
+      const sinTheta = Math.sin(angle);
+      const beta = (Math.PI * slitWidth * sinTheta) / wavelength;
+      const sinc = Math.abs(beta) < 0.0001 ? 1 : Math.sin(beta) / beta;
+      screenIntensity[y] = sinc * sinc;
+    } else {
+      // Double-slit: sharp interference fringes
+      const sr1 = Math.sqrt(screenDx * screenDx + dy1 * dy1) || 0.001;
+      const sr2 = Math.sqrt(screenDx * screenDx + dy2 * dy2) || 0.001;
+      screenIntensity[y] = Math.pow(Math.cos(k * (sr2 - sr1) / 2), 2);
+    }
   }
 
   // Build entire frame in one ImageData — no offset putImageData call
@@ -65,11 +72,17 @@ function renderFrame(ctx, wavelength, slitSep, showOneSlit, time) {
         const r1 = Math.sqrt(dx * dx + dy1 * dy1) || 0.001;
         const r2 = Math.sqrt(dx * dx + dy2 * dy2) || 0.001;
 
-        const pathDiff = r2 - r1;
-        const staticI = Math.pow(Math.cos(k * pathDiff / 2), 2);
-        const finalI = showOneSlit ? staticI * 0.8 : staticI;
-        const ripple = (Math.cos(k * r1 - omega * time) + 1) * 0.5;
-        const intensity = finalI * (0.6 + 0.4 * ripple);
+        let intensity;
+        if (showOneSlit) {
+          // Single slit: circular wave from slit 1 only — no fringes
+          intensity = (Math.cos(k * r1 - omega * time) + 1) * 0.5 * 0.9;
+        } else {
+          // Double slit: interference fringes
+          const pathDiff = r2 - r1;
+          const staticI = Math.pow(Math.cos(k * pathDiff / 2), 2);
+          const ripple = (Math.cos(k * r1 - omega * time) + 1) * 0.5;
+          intensity = staticI * (0.6 + 0.4 * ripple);
+        }
 
         r = Math.floor(intensity * 40);
         g = Math.floor(intensity * 210);
