@@ -1,16 +1,33 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 
-const SIM_W = 380;
+const SIM_W = 420;
 const SIM_H = 260;
+const SCREEN_W = 28;
+const SCREEN_X = SIM_W - SCREEN_W; // screen occupies rightmost columns
 
 function renderFrame(ctx, wavelength, slitSep, showOneSlit, time) {
   const k = (2 * Math.PI) / wavelength;
   const omega = 2.0;
-  const barrierX = Math.floor(SIM_W * 0.38);
+  const barrierX = Math.floor(SIM_W * 0.34);
   const cy = SIM_H / 2;
   const slit1Y = cy - slitSep / 2;
   const slit2Y = cy + slitSep / 2;
   const slitHalf = 5;
+
+  // Pre-compute per-row screen intensity (static, time-averaged)
+  // Uses the path difference at the screen's x position
+  const screenDx = SCREEN_X - barrierX;
+  const screenIntensity = new Float32Array(SIM_H);
+  for (let y = 0; y < SIM_H; y++) {
+    const dy1 = y - slit1Y;
+    const dy2 = y - slit2Y;
+    const sr1 = Math.sqrt(screenDx * screenDx + dy1 * dy1) || 0.001;
+    const sr2 = Math.sqrt(screenDx * screenDx + dy2 * dy2) || 0.001;
+    const pd = sr2 - sr1;
+    screenIntensity[y] = showOneSlit
+      ? Math.pow(Math.cos(k * pd / 2), 2) * 0.8
+      : Math.pow(Math.cos(k * pd / 2), 2);
+  }
 
   // Build entire frame in one ImageData — no offset putImageData call
   const imgData = ctx.createImageData(SIM_W, SIM_H);
@@ -28,20 +45,29 @@ function renderFrame(ctx, wavelength, slitSep, showOneSlit, time) {
         g = Math.floor(amp * 90);
         b = Math.floor(amp * 180);
 
+      } else if (x >= SCREEN_X) {
+        // Screen — vertical strip showing the interference pattern
+        const si = screenIntensity[y];
+        // Glow: cyan-white at bright fringes, near-black at dark
+        r = Math.floor(si * 200 + (1 - si) * 8);
+        g = Math.floor(si * 240 + (1 - si) * 8);
+        b = Math.floor(si * 220 + (1 - si) * 26);
+
+      } else if (x === SCREEN_X - 1) {
+        // Thin separator line before screen
+        r = 40; g = 80; b = 90;
+
       } else if (x >= barrierX + 3) {
-        // Right side — interference pattern
+        // Middle — animated interference wave field
         const dx = x - barrierX;
         const dy1 = y - slit1Y;
         const dy2 = y - slit2Y;
         const r1 = Math.sqrt(dx * dx + dy1 * dy1) || 0.001;
         const r2 = Math.sqrt(dx * dx + dy2 * dy2) || 0.001;
 
-        // Time-averaged intensity — always shows clear fringes
         const pathDiff = r2 - r1;
         const staticI = Math.pow(Math.cos(k * pathDiff / 2), 2);
         const finalI = showOneSlit ? staticI * 0.8 : staticI;
-
-        // Wave-front ripple for animation
         const ripple = (Math.cos(k * r1 - omega * time) + 1) * 0.5;
         const intensity = finalI * (0.6 + 0.4 * ripple);
 
@@ -64,7 +90,7 @@ function renderFrame(ctx, wavelength, slitSep, showOneSlit, time) {
   // Write entire frame at once — no offset
   ctx.putImageData(imgData, 0, 0);
 
-  // Slit openings: draw on top as cyan glow
+  // Slit glow
   ctx.strokeStyle = 'rgba(126,249,255,0.9)';
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -77,6 +103,12 @@ function renderFrame(ctx, wavelength, slitSep, showOneSlit, time) {
     ctx.lineTo(barrierX, slit2Y + slitHalf);
     ctx.stroke();
   }
+
+  // Screen label
+  ctx.fillStyle = 'rgba(126,249,255,0.5)';
+  ctx.font = '9px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('Screen', SCREEN_X + SCREEN_W / 2, SIM_H - 6);
 }
 
 export default function DoubleSlit() {
